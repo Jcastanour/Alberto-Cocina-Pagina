@@ -1,0 +1,6 @@
+// INSTRUCCIONES PARA SUBIR NUEVAS FOTOS DE TUS PROYECTOS
+//
+// 1. Guarda tus fotos reales en esta carpeta (public/images/proyectos/).
+// 2. Nombra tus fotos de manera sencilla sin espacios si es posible, por ejemplo: "cocina-poblado-1.jpg".
+// 3. Luego ve al archivo "src/data.js" en tu código, y en donde dice "imagenPrincipal", 
+//    escribes exactamente la ruta así: "/images/proyectos/cocina-poblado-1.jpg".
