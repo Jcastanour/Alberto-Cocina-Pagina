@@ -1,0 +1,18 @@
+services:
+  aycobras-api:
+    build: ./backend
+    container_name: aycobras-api
+    restart: unless-stopped
+    env_file: ./backend/.env
+    # Sin "ports:" — Caddy hace el reverse proxy desde el host.
+    # Volumen solo como respaldo si NO se usa R2 (modo local); con R2 no se usa.
+    volumes:
+      - ./backend/data:/app/data
+    networks:
+      elixir-net:
+        aliases:
+          - aycobras-api
+
+networks:
+  elixir-net:
+    external: true

@@ -1,0 +1,30 @@
+name: Deploy backend a Oracle
+
+# Despliega la API cuando hay cambios en backend/ (o se dispara manualmente).
+# El frontend NO necesita Action: Cloudflare Pages lo re-publica solo en cada push.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar por SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/aycobras
+            git pull origin main
+            docker-compose up -d --build aycobras-api
+            docker ps --filter "name=aycobras-api"
+            docker logs aycobras-api --tail 20

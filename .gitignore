@@ -1,8 +1,21 @@
+# Dependencias y builds
 node_modules/
 dist/
-.env
-.DS_Store
-api/__pycache__/
-api/.venv/
-api/venv/
 *.pyc
+__pycache__/
+.venv/
+venv/
+
+# Entorno y secretos
+.env
+.env.local
+.env.*.local
+
+# Datastore local del backend (modo sin R2)
+backend/data/
+
+# Sistema
+.DS_Store
+
+# Vite cache
+.vite/
