@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Trash2, Pencil, LogOut, X, Plus } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Trash2, Pencil, LogOut, X, Star, ImagePlus, Clipboard, Sparkles, GripVertical } from 'lucide-react';
 import { categoriasProyectos } from '../data';
+import { plantillaPara } from '../templates';
 import {
   login as apiLogin,
   getProyectos,
@@ -26,6 +27,9 @@ const emptyForm = {
   observaciones: '',
 };
 
+let _idSeq = 0;
+const uid = () => `img-${Date.now()}-${_idSeq++}`;
+
 const Admin = () => {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const [password, setPassword] = useState('');
@@ -34,16 +38,45 @@ const Admin = () => {
   const [proyectos, setProyectos] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editId, setEditId] = useState(null);
-  const [principal, setPrincipal] = useState(null); // File nuevo
-  const [galeriaNueva, setGaleriaNueva] = useState([]); // File[]
-  const [galeriaKeep, setGaleriaKeep] = useState([]); // urls existentes a conservar (edición)
-  const [principalActual, setPrincipalActual] = useState(''); // url existente (edición)
 
+  // Lista única y ordenada de imágenes. La PRIMERA es la principal.
+  // Cada ítem: { id, kind:'new'|'existing', file?, url?, previewUrl? }
+  const [imagenes, setImagenes] = useState([]);
+  const imagenesRef = useRef(imagenes);
+  imagenesRef.current = imagenes;
+
+  const [dragId, setDragId] = useState(null);
+  const [dropActive, setDropActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState({ type: '', text: '' });
 
   const cargar = () => getProyectos().then(setProyectos).catch(() => {});
   useEffect(() => { if (token) cargar(); }, [token]);
+
+  // Pegar (Ctrl/Cmd+V) imágenes desde el portapapeles, en cualquier parte del panel.
+  useEffect(() => {
+    if (!token) return;
+    const onPaste = (e) => {
+      const items = e.clipboardData?.items || [];
+      const files = [];
+      for (const it of items) {
+        if (it.type && it.type.startsWith('image/')) {
+          const f = it.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length) { e.preventDefault(); addFiles(files); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [token]);
+
+  // Liberar object URLs al desmontar.
+  useEffect(() => () => {
+    imagenesRef.current.forEach((it) => {
+      if (it.kind === 'new' && it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+    });
+  }, []);
 
   // --- Login ---
   const handleLogin = async (e) => {
@@ -65,16 +98,78 @@ const Admin = () => {
     resetForm();
   };
 
+  // --- Imágenes ---
+  const addFiles = (fileList) => {
+    const imgs = Array.from(fileList).filter((f) => f.type && f.type.startsWith('image/'));
+    if (!imgs.length) return;
+    setImagenes((prev) => [
+      ...prev,
+      ...imgs.map((f) => ({ id: uid(), kind: 'new', file: f, previewUrl: URL.createObjectURL(f) })),
+    ]);
+  };
+
+  const quitarImg = (id) => {
+    setImagenes((prev) => {
+      const it = prev.find((x) => x.id === id);
+      if (it?.kind === 'new' && it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+      return prev.filter((x) => x.id !== id);
+    });
+  };
+
+  const hacerPrincipal = (id) => {
+    setImagenes((prev) => {
+      const i = prev.findIndex((x) => x.id === id);
+      if (i <= 0) return prev;
+      const next = [...prev];
+      const [m] = next.splice(i, 1);
+      next.unshift(m);
+      return next;
+    });
+  };
+
+  const onDragOverItem = (e, overId) => {
+    e.preventDefault();
+    if (dragId == null || dragId === overId) return;
+    setImagenes((prev) => {
+      const from = prev.findIndex((x) => x.id === dragId);
+      const to = prev.findIndex((x) => x.id === overId);
+      if (from < 0 || to < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const onDropZone = (e) => {
+    e.preventDefault();
+    setDropActive(false);
+    if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+  };
+
+  const srcDe = (it) => (it.kind === 'new' ? it.previewUrl : resolveImg(it.url));
+
   // --- Form ---
   const onInput = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
+  const usarPlantilla = () => {
+    const t = plantillaPara(form.categoria);
+    if (form.descripcionCorta.trim() && !window.confirm('¿Reemplazar la descripción actual con la plantilla?')) return;
+    setForm((f) => ({
+      ...f,
+      descripcionCorta: t.descripcion,
+      trabajosRealizados: t.trabajos.join(', '),
+      materialesUsados: t.materiales.join(', '),
+    }));
+  };
+
   const resetForm = () => {
+    imagenesRef.current.forEach((it) => {
+      if (it.kind === 'new' && it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+    });
     setForm(emptyForm);
     setEditId(null);
-    setPrincipal(null);
-    setGaleriaNueva([]);
-    setGaleriaKeep([]);
-    setPrincipalActual('');
+    setImagenes([]);
   };
 
   const startEdit = (p) => {
@@ -91,31 +186,31 @@ const Admin = () => {
       estado: p.estado || 'terminado',
       observaciones: p.observaciones || '',
     });
-    setPrincipal(null);
-    setPrincipalActual(p.imagenPrincipal || '');
-    setGaleriaKeep(p.fotosGaleria || []);
-    setGaleriaNueva([]);
+    const urls = [p.imagenPrincipal, ...(p.fotosGaleria || [])].filter(Boolean);
+    setImagenes(urls.map((url) => ({ id: uid(), kind: 'existing', url })));
     setMsg({ type: '', text: '' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!editId && !principal) {
-      setMsg({ type: 'error', text: 'Selecciona la foto principal.' });
+    if (imagenes.length === 0) {
+      setMsg({ type: 'error', text: 'Agrega al menos una imagen.' });
       return;
     }
     setLoading(true);
-    setMsg({ type: 'info', text: 'Guardando…' });
+    setMsg({ type: 'info', text: `Subiendo ${imagenes.length} ${imagenes.length === 1 ? 'imagen' : 'imágenes'}…` });
 
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-    if (principal) fd.append('imagenPrincipal', principal);
-    galeriaNueva.forEach((f) => fd.append('galeria', f));
+    const orden = imagenes.map((it) =>
+      it.kind === 'existing' ? { type: 'existing', url: it.url } : { type: 'new' }
+    );
+    fd.append('orden', JSON.stringify(orden));
+    imagenes.filter((it) => it.kind === 'new').forEach((it) => fd.append('imagenes', it.file));
 
     try {
       if (editId) {
-        fd.append('fotosGaleriaKeep', JSON.stringify(galeriaKeep));
         await editarProyecto(editId, fd, token);
         setMsg({ type: 'success', text: 'Proyecto actualizado.' });
       } else {
@@ -143,7 +238,7 @@ const Admin = () => {
     }
   };
 
-  // --- Render login ---
+  // --- Login screen ---
   if (!token) {
     return (
       <div className="page-wrapper admin-login-wrap">
@@ -164,7 +259,7 @@ const Admin = () => {
     );
   }
 
-  // --- Render panel ---
+  // --- Panel ---
   return (
     <div className="page-wrapper admin-panel">
       <div className="container">
@@ -178,19 +273,70 @@ const Admin = () => {
         {msg.text && <div className={`form-msg ${msg.type}`}>{msg.text}</div>}
 
         <form className="admin-form" onSubmit={handleSubmit}>
-          {/* Foto principal */}
-          <div className="upload-box">
-            <label>Foto principal {editId ? '(opcional al editar)' : '(obligatoria)'}</label>
-            <input type="file" accept="image/*" onChange={(e) => setPrincipal(e.target.files[0] || null)} />
-            {(principal || principalActual) && (
-              <img
-                className="preview-main"
-                src={principal ? URL.createObjectURL(principal) : resolveImg(principalActual)}
-                alt="Vista previa"
-              />
+          {/* GESTOR DE IMÁGENES */}
+          <div>
+            <label className="block-label">Fotos del proyecto</label>
+            <p className="hint">
+              La primera foto es la <strong>principal</strong>. Arrastra para reordenar o pulsa la ⭐ para hacerla principal.
+            </p>
+
+            <div
+              className={`dropzone ${dropActive ? 'active' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDropActive(true); }}
+              onDragLeave={() => setDropActive(false)}
+              onDrop={onDropZone}
+            >
+              <ImagePlus size={30} />
+              <p className="dropzone-title">Arrastra fotos aquí, pégalas o selecciónalas</p>
+              <p className="dropzone-hint">
+                <Clipboard size={14} /> Pega con <strong>Ctrl/Cmd + V</strong> las fotos que te llegan por WhatsApp
+              </p>
+              <label className="btn btn-primary dropzone-btn">
+                Seleccionar fotos
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+                />
+              </label>
+            </div>
+
+            {imagenes.length > 0 && (
+              <div className="img-manager">
+                <div className="img-count">{imagenes.length} {imagenes.length === 1 ? 'foto' : 'fotos'}</div>
+                <div className="img-grid">
+                  {imagenes.map((it, idx) => (
+                    <div
+                      key={it.id}
+                      className={`img-tile ${idx === 0 ? 'is-main' : ''} ${dragId === it.id ? 'dragging' : ''}`}
+                      draggable
+                      onDragStart={() => setDragId(it.id)}
+                      onDragOver={(e) => onDragOverItem(e, it.id)}
+                      onDragEnd={() => setDragId(null)}
+                    >
+                      <img src={srcDe(it)} alt="" />
+                      {idx === 0 && <span className="img-main-badge">Principal</span>}
+                      <span className="img-drag-handle"><GripVertical size={16} /></span>
+                      <div className="img-actions">
+                        {idx !== 0 && (
+                          <button type="button" title="Hacer principal" onClick={() => hacerPrincipal(it.id)}>
+                            <Star size={15} />
+                          </button>
+                        )}
+                        <button type="button" title="Quitar" className="danger" onClick={() => quitarImg(it.id)}>
+                          <X size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
+          {/* CAMPOS */}
           <div className="form-grid">
             <Field label="Nombre del proyecto">
               <input name="nombre" value={form.nombre} onChange={onInput} required placeholder="Ej: Cocina integral El Poblado" />
@@ -217,10 +363,17 @@ const Admin = () => {
             </Field>
           </div>
 
-          <Field label="Descripción">
+          <div className="field">
+            <div className="label-row">
+              <label>Descripción</label>
+              <button type="button" className="btn-template" onClick={usarPlantilla}>
+                <Sparkles size={15} /> Usar plantilla
+              </button>
+            </div>
             <textarea name="descripcionCorta" value={form.descripcionCorta} onChange={onInput} required
-              placeholder="Breve resumen del proyecto…" />
-          </Field>
+              placeholder="Breve resumen del proyecto… (o usa una plantilla y ajústala)" />
+          </div>
+
           <Field label="Trabajos realizados (separados por coma)">
             <input name="trabajosRealizados" value={form.trabajosRealizados} onChange={onInput}
               placeholder="Diseño, Fabricación, Instalación" />
@@ -233,31 +386,6 @@ const Admin = () => {
             <input name="observaciones" value={form.observaciones} onChange={onInput} />
           </Field>
 
-          {/* Galería */}
-          <div className="upload-box">
-            <label>Galería de fotos (varias)</label>
-            <input type="file" accept="image/*" multiple
-              onChange={(e) => setGaleriaNueva([...galeriaNueva, ...Array.from(e.target.files)])} />
-            <div className="preview-grid">
-              {galeriaKeep.map((url) => (
-                <div className="preview-thumb" key={url}>
-                  <img src={resolveImg(url)} alt="" />
-                  <button type="button" onClick={() => setGaleriaKeep(galeriaKeep.filter((u) => u !== url))}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-              {galeriaNueva.map((file, i) => (
-                <div className="preview-thumb nueva" key={i}>
-                  <img src={URL.createObjectURL(file)} alt="" />
-                  <button type="button" onClick={() => setGaleriaNueva(galeriaNueva.filter((_, j) => j !== i))}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
           <div className="admin-actions">
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading ? 'Guardando…' : editId ? 'Guardar cambios' : 'Publicar proyecto'}
@@ -266,7 +394,7 @@ const Admin = () => {
           </div>
         </form>
 
-        {/* Lista de proyectos */}
+        {/* LISTA */}
         <div className="admin-list">
           <h2 className="section-title section-title-left">Proyectos publicados ({proyectos.length})</h2>
           {proyectos.length === 0 && <p className="empty-state">Aún no hay proyectos. ¡Crea el primero!</p>}
@@ -275,7 +403,7 @@ const Admin = () => {
               <img src={resolveImg(p.imagenPrincipal)} alt={p.nombre} />
               <div className="admin-row-info">
                 <strong>{p.nombre}</strong>
-                <span>{p.ciudad} · {p.año} · {p.categoria}</span>
+                <span>{p.ciudad} · {p.año} · {p.categoria} · {(p.fotosGaleria?.length || 0) + 1} fotos</span>
               </div>
               <div className="admin-row-actions">
                 <button className="icon-btn" onClick={() => startEdit(p)} title="Editar"><Pencil size={18} /></button>
@@ -285,6 +413,13 @@ const Admin = () => {
           ))}
         </div>
       </div>
+
+      {loading && (
+        <div className="admin-overlay">
+          <div className="spinner" />
+          <p>{msg.text || 'Guardando…'}</p>
+        </div>
+      )}
     </div>
   );
 };

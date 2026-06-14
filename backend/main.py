@@ -62,6 +62,45 @@ async def _store_upload(file: UploadFile) -> str:
     return storage.save_image(data, file.filename, file.content_type)
 
 
+async def _build_image_list(orden: str, imagenes: list, existentes: set) -> list:
+    """Construye la lista ordenada final de URLs a partir de `orden` (JSON) y los
+    archivos nuevos `imagenes`. `existentes` son las URLs válidas del proyecto
+    (para no aceptar URLs ajenas en edición). Si `orden` no llega, se asume que
+    todos los archivos son nuevos en su orden de subida."""
+    nuevos = [f for f in imagenes if f and f.filename]
+
+    try:
+        items = json.loads(orden) if orden else None
+    except json.JSONDecodeError:
+        items = None
+
+    if not items:
+        # Sin orden explícito: todos los archivos nuevos en orden de subida.
+        final = [await _store_upload(f) for f in nuevos]
+    else:
+        final = []
+        idx_nuevo = 0
+        for it in items:
+            if it.get("type") == "existing":
+                url = it.get("url")
+                if url in existentes:
+                    final.append(url)
+            else:  # "new"
+                if idx_nuevo < len(nuevos):
+                    final.append(await _store_upload(nuevos[idx_nuevo]))
+                    idx_nuevo += 1
+        # Archivos nuevos que no quedaron mapeados en `orden` → al final.
+        while idx_nuevo < len(nuevos):
+            final.append(await _store_upload(nuevos[idx_nuevo]))
+            idx_nuevo += 1
+
+    if not final:
+        raise HTTPException(400, "Sube al menos una imagen")
+    if len(final) > MAX_GALLERY + 1:
+        raise HTTPException(400, f"Máximo {MAX_GALLERY + 1} imágenes por proyecto")
+    return final
+
+
 # --- Salud y autenticación -----------------------------------------------------
 @app.get("/api/health")
 def health():
@@ -105,14 +144,10 @@ async def crear_proyecto(
     materialesUsados: str = Form(""),
     estado: str = Form("terminado"),
     observaciones: str = Form(""),
-    imagenPrincipal: UploadFile = File(...),
-    galeria: list[UploadFile] = File(default=[]),
+    orden: str = Form(""),
+    imagenes: list[UploadFile] = File(default=[]),
 ):
-    if len(galeria) > MAX_GALLERY:
-        raise HTTPException(400, f"Máximo {MAX_GALLERY} fotos en la galería")
-
-    principal_url = await _store_upload(imagenPrincipal)
-    galeria_urls = [await _store_upload(f) for f in galeria if f and f.filename]
+    final = await _build_image_list(orden, imagenes, existentes=set())
 
     proyecto = {
         "id": f"proyecto-{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}",
@@ -125,8 +160,8 @@ async def crear_proyecto(
         "trabajosRealizados": _split_csv(trabajosRealizados),
         "materialesUsados": _split_csv(materialesUsados),
         "estado": estado,
-        "imagenPrincipal": principal_url,
-        "fotosGaleria": galeria_urls,
+        "imagenPrincipal": final[0],
+        "fotosGaleria": final[1:],
         "observaciones": observaciones,
         "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
@@ -150,34 +185,22 @@ async def editar_proyecto(
     materialesUsados: str = Form(""),
     estado: str = Form("terminado"),
     observaciones: str = Form(""),
-    fotosGaleriaKeep: str = Form("[]"),  # JSON con las URLs de galería a conservar
-    imagenPrincipal: UploadFile = File(default=None),
-    galeria: list[UploadFile] = File(default=[]),
+    orden: str = Form(""),
+    imagenes: list[UploadFile] = File(default=[]),
 ):
     proyectos = storage.load_projects()
     proyecto = next((p for p in proyectos if p.get("id") == proyecto_id), None)
     if proyecto is None:
         raise HTTPException(404, "Proyecto no encontrado")
 
-    # Galería: conservar las indicadas, borrar las quitadas, añadir nuevas.
-    try:
-        keep = set(json.loads(fotosGaleriaKeep or "[]"))
-    except json.JSONDecodeError:
-        keep = set(proyecto.get("fotosGaleria", []))
-    for url in proyecto.get("fotosGaleria", []):
-        if url not in keep:
-            storage.delete_image(url)
-    nuevas = [await _store_upload(f) for f in galeria if f and f.filename]
-    galeria_final = [u for u in proyecto.get("fotosGaleria", []) if u in keep] + nuevas
-    if len(galeria_final) > MAX_GALLERY:
-        raise HTTPException(400, f"Máximo {MAX_GALLERY} fotos en la galería")
+    previas = [proyecto.get("imagenPrincipal")] + list(proyecto.get("fotosGaleria", []))
+    previas = [u for u in previas if u]
+    final = await _build_image_list(orden, imagenes, existentes=set(previas))
 
-    # Imagen principal: reemplazar solo si llega una nueva.
-    principal_url = proyecto.get("imagenPrincipal")
-    if imagenPrincipal and imagenPrincipal.filename:
-        nueva_principal = await _store_upload(imagenPrincipal)
-        storage.delete_image(principal_url)
-        principal_url = nueva_principal
+    # Borrar de R2 las imágenes previas que ya no están en el orden final.
+    for url in previas:
+        if url not in final:
+            storage.delete_image(url)
 
     proyecto.update(
         {
@@ -191,8 +214,8 @@ async def editar_proyecto(
             "materialesUsados": _split_csv(materialesUsados),
             "estado": estado,
             "observaciones": observaciones,
-            "imagenPrincipal": principal_url,
-            "fotosGaleria": galeria_final,
+            "imagenPrincipal": final[0],
+            "fotosGaleria": final[1:],
         }
     )
     storage.save_projects(proyectos)
