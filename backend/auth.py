@@ -14,8 +14,47 @@ import time
 
 from fastapi import Header, HTTPException
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-cambiar-en-produccion")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+# Valores por defecto SOLO para desarrollo local (sin R2). En producción (R2) la
+# app no arranca con ellos: ver require_production_secrets().
+DEV_SECRET_KEY = "dev-secret-cambiar-en-produccion"
+DEV_ADMIN_PASSWORD = "admin"
+
+SECRET_KEY = os.environ.get("SECRET_KEY", DEV_SECRET_KEY)
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", DEV_ADMIN_PASSWORD)
+
+# Valores públicos (defaults del código y ejemplos de .env.example): no protegen nada.
+_INSEGUROS = {
+    "SECRET_KEY": {DEV_SECRET_KEY, "genera-un-valor-aleatorio-largo"},
+    "ADMIN_PASSWORD": {DEV_ADMIN_PASSWORD, "cambia-esta-clave"},
+}
+
+
+def insecure_secrets(secret_key: str, admin_password: str) -> list:
+    """Nombres de las variables que faltan, están vacías o siguen en un valor de
+    ejemplo. Nunca devuelve ni registra los valores."""
+    valores = {"SECRET_KEY": secret_key, "ADMIN_PASSWORD": admin_password}
+    return [
+        nombre
+        for nombre, valor in valores.items()
+        if not (valor or "").strip() or valor.strip() in _INSEGUROS[nombre]
+    ]
+
+
+def require_production_secrets(production: bool, secret_key: str = None, admin_password: str = None) -> None:
+    """En producción (almacenamiento R2) se niega a arrancar con secretos por
+    defecto. En modo local no exige nada, para poder desarrollar sin configurar."""
+    if not production:
+        return
+    malas = insecure_secrets(
+        SECRET_KEY if secret_key is None else secret_key,
+        ADMIN_PASSWORD if admin_password is None else admin_password,
+    )
+    if malas:
+        raise RuntimeError(
+            "Configuración insegura, la API no arranca en modo producción (R2). "
+            "Define un valor propio (no vacío y distinto del de ejemplo) en "
+            "backend/.env para: " + ", ".join(malas)
+        )
 
 
 TOKEN_TTL_SECONDS = 12 * 60 * 60  # el admin vuelve a entrar cada 12 horas

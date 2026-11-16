@@ -16,8 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import storage
-from auth import check_password, make_token, require_admin
+from auth import check_password, make_token, require_admin, require_production_secrets
 from ratelimit import SlidingWindowLimiter, client_ip
+
+# Con R2 (producción) no se arranca con SECRET_KEY / ADMIN_PASSWORD por defecto.
+require_production_secrets(storage.USE_R2)
 
 app = FastAPI(title="AYC Obras y Diseños — API")
 
