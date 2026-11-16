@@ -10,12 +10,14 @@ import os
 import time
 import uuid
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 import storage
 from auth import check_password, make_token, require_admin
+from ratelimit import SlidingWindowLimiter, client_ip
 
 app = FastAPI(title="AYC Obras y Diseños — API")
 
@@ -107,9 +109,23 @@ def health():
     return {"status": "ok", "storage": "r2" if storage.USE_R2 else "local"}
 
 
+class LoginBody(BaseModel):
+    password: str = Field(max_length=256)
+
+
+# Freno a fuerza bruta: intentos de login por IP y minuto (en memoria).
+login_limiter = SlidingWindowLimiter(limit=5, window=60)
+
+
 @app.post("/api/login")
-async def login(payload: dict):
-    if not check_password(payload.get("password", "")):
+async def login(body: LoginBody, request: Request):
+    if not login_limiter.hit(client_ip(request)):
+        raise HTTPException(
+            429,
+            "Demasiados intentos. Espera un minuto e intenta de nuevo.",
+            headers={"Retry-After": "60"},
+        )
+    if not check_password(body.password):
         raise HTTPException(401, "Contraseña incorrecta")
     return {"token": make_token()}
 

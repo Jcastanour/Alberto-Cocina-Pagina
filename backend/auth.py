@@ -20,8 +20,14 @@ def make_token() -> str:
     return hmac.new(SECRET_KEY.encode(), b"aycobras-admin", hashlib.sha256).hexdigest()
 
 
+def _same(a: str, b: str) -> bool:
+    """Comparación en tiempo constante sobre bytes UTF-8 (con str, compare_digest
+    lanza TypeError si hay caracteres no ASCII)."""
+    return hmac.compare_digest((a or "").encode("utf-8"), (b or "").encode("utf-8"))
+
+
 def check_password(password: str) -> bool:
-    return hmac.compare_digest(password or "", ADMIN_PASSWORD)
+    return _same(password, ADMIN_PASSWORD)
 
 
 def verify_token(token: str) -> bool:
