@@ -98,6 +98,18 @@ const Admin = () => {
     resetForm();
   };
 
+  // El token vence (12 h) o deja de valer si cambia la contraseña: ante un 401
+  // se vuelve a la pantalla de login en vez de dejar el panel con un error. No se
+  // limpia el formulario: al volver a entrar sigue ahí lo que se estaba editando.
+  const sesionVencida = (err) => {
+    if (err?.status !== 401) return false;
+    localStorage.removeItem(TOKEN_KEY);
+    setToken('');
+    setMsg({ type: '', text: '' });
+    setLoginError('Tu sesión venció. Ingresa la contraseña de nuevo.');
+    return true;
+  };
+
   // --- Imágenes ---
   const addFiles = (fileList) => {
     const imgs = Array.from(fileList).filter((f) => f.type && f.type.startsWith('image/'));
@@ -220,7 +232,7 @@ const Admin = () => {
       resetForm();
       cargar();
     } catch (err) {
-      if (String(err.message).includes('401')) logout();
+      if (sesionVencida(err)) return;
       setMsg({ type: 'error', text: `Error: ${err.message}` });
     } finally {
       setLoading(false);
@@ -234,6 +246,7 @@ const Admin = () => {
       cargar();
       if (editId === p.id) resetForm();
     } catch (err) {
+      if (sesionVencida(err)) return;
       setMsg({ type: 'error', text: `Error al borrar: ${err.message}` });
     }
   };

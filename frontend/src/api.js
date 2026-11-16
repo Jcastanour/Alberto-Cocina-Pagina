@@ -13,7 +13,10 @@ async function request(path, options = {}) {
     } catch {
       /* sin cuerpo JSON */
     }
-    throw new Error(detail || `Error ${res.status}`);
+    // `detail` es texto en los errores propios; en los 422 de validación es una lista.
+    const err = new Error(typeof detail === "string" && detail ? detail : `Error ${res.status}`);
+    err.status = res.status; // quien llama decide por código (401 → volver al login)
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();

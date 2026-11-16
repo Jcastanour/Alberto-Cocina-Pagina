@@ -89,10 +89,17 @@ def save_projects(projects: list) -> None:
 
 
 # --- Imágenes ------------------------------------------------------------------
+ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif"}
+
+
 def save_image(file_bytes: bytes, filename: str, content_type: str) -> str:
     """Guarda una imagen y devuelve su URL pública (absoluta en R2,
     relativa /api/uploads/... en local)."""
-    ext = os.path.splitext(filename or "")[1].lower() or ".jpg"
+    ext = os.path.splitext(filename or "")[1].lower()
+    # La extensión termina en una URL pública: solo las de imagen conocidas
+    # (nunca .html, .svg, .js… aunque quien llame no lo haya validado).
+    if ext.lstrip(".") not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError("Extensión de imagen no permitida")
     key = f"{time.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
     if USE_R2:
         _s3.put_object(
