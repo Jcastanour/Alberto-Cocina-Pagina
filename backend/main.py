@@ -48,6 +48,7 @@ if not storage.USE_R2:
 # Límites de subida
 MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_MB", "10")) * 1024 * 1024
 MAX_GALLERY = int(os.environ.get("MAX_GALLERY", "12"))
+MAX_ORDEN_ITEMS = 200  # tope de entradas en `orden` (muy por encima de lo real)
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
 
 
@@ -67,6 +68,26 @@ async def _store_upload(file: UploadFile) -> str:
     return storage.save_image(data, file.filename, file.content_type)
 
 
+def _parse_orden(orden: str):
+    """`orden` es un JSON con una lista de objetos {"type": "existing"|"new", ...}.
+    Vacío → None (sin orden explícito). Cualquier otra forma → 400."""
+    if not orden or not orden.strip():
+        return None
+    try:
+        items = json.loads(orden)
+    except (ValueError, RecursionError):
+        raise HTTPException(400, "El orden de las imágenes no es válido")
+    if not isinstance(items, list) or len(items) > MAX_ORDEN_ITEMS:
+        raise HTTPException(400, "El orden de las imágenes no es válido")
+    for it in items:
+        if not isinstance(it, dict):
+            raise HTTPException(400, "El orden de las imágenes no es válido")
+        url = it.get("url")
+        if it.get("type") == "existing" and not isinstance(url, str):
+            raise HTTPException(400, "El orden de las imágenes no es válido")
+    return items
+
+
 async def _build_image_list(orden: str, imagenes: list, existentes: set) -> list:
     """Construye la lista ordenada final de URLs a partir de `orden` (JSON) y los
     archivos nuevos `imagenes`. `existentes` son las URLs válidas del proyecto
@@ -74,10 +95,7 @@ async def _build_image_list(orden: str, imagenes: list, existentes: set) -> list
     todos los archivos son nuevos en su orden de subida."""
     nuevos = [f for f in imagenes if f and f.filename]
 
-    try:
-        items = json.loads(orden) if orden else None
-    except json.JSONDecodeError:
-        items = None
+    items = _parse_orden(orden)
 
     if not items:
         # Sin orden explícito: todos los archivos nuevos en orden de subida.
