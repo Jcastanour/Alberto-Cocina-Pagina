@@ -59,9 +59,11 @@ def load_projects() -> list:
         if USE_R2:
             try:
                 obj = _s3.get_object(Bucket=R2_BUCKET, Key=PROJECTS_KEY)
-                return json.loads(obj["Body"].read().decode("utf-8"))
-            except Exception:
-                return []
+            except _s3.exceptions.NoSuchKey:
+                return []  # catálogo todavía sin crear
+            # Cualquier otro error (red, credenciales) se propaga: devolver [] hacía
+            # que el siguiente guardado pisara el catálogo entero con una lista vacía.
+            return json.loads(obj["Body"].read().decode("utf-8"))
         if not os.path.exists(PROJECTS_FILE):
             return []
         with open(PROJECTS_FILE, encoding="utf-8") as f:
