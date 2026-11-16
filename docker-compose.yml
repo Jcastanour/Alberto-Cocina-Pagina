@@ -3,6 +3,12 @@ services:
     build: ./backend
     container_name: aycobras-api
     restart: unless-stopped
+    # Topes: un fallo o una carga rara en este contenedor no deja sin recursos al servidor.
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
     env_file: ./backend/.env
     # Sin "ports:" — Caddy hace el reverse proxy desde el host.
     # Volumen solo como respaldo si NO se usa R2 (modo local); con R2 no se usa.
