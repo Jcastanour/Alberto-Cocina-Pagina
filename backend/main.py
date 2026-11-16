@@ -23,7 +23,13 @@ from ratelimit import SlidingWindowLimiter, client_ip
 # Con R2 (producción) no se arranca con SECRET_KEY / ADMIN_PASSWORD por defecto.
 require_production_secrets(storage.USE_R2)
 
-app = FastAPI(title="AYC Obras y Diseños — API")
+# La documentación interactiva y el esquema OpenAPI no se publican.
+app = FastAPI(
+    title="AYC Obras y Diseños — API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # Límites de subida
 MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_MB", "10")) * 1024 * 1024
@@ -57,7 +63,8 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    # El token admin viaja en la cabecera Authorization, no en cookies.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
