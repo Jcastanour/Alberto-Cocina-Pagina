@@ -1,0 +1,5 @@
+# Solo para correr las pruebas (no se instala en la imagen de producción):
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m pytest -q tests
+pytest==9.2.0
+httpx2==2.16.2
